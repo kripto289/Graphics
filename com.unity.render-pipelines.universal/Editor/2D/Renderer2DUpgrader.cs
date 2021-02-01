@@ -134,7 +134,7 @@ namespace UnityEditor.Experimental.Rendering.Universal
             }
         }
 
-        [MenuItem("Edit/Rendering/Materials/Convert All Built-in Materials to UniversalRP 2D Renderer", false, priority = CoreUtils.Sections.k_Section1 + + CoreUtils.Priorities.k_EditMenuPriority + 2)]
+        [MenuItem("Edit/Rendering/Materials/Convert All Built-in Materials to UniversalRP 2D Renderer", false, priority = CoreUtils.Sections.k_Section1 + CoreUtils.Priorities.k_EditMenuPriority + 2)]
         static void UpgradeProjectTo2DRenderer()
         {
             if (!EditorUtility.DisplayDialog("2D Renderer Upgrader", "The upgrade will search for all prefabs in your project that use Sprite Renderers and change the material references of those Sprite Renderers to a lit material. You can't undo this operation. It's highly recommended to backup your project before proceeding.", "Proceed", "Cancel"))

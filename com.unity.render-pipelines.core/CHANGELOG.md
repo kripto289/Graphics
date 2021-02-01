@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](http://semver.org/spec/v2.0.0.
 ### Added
 - Support for the PlayStation 5 platform has been added.
 
-### Changed 
+### Changed
 - Moved Edit/Render Pipeline/Generate Shader Includes to Edit/Rendering/Generate Shader Includes
 
 ## [11.0.0] - 2020-10-21
