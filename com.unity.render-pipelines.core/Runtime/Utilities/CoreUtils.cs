@@ -64,7 +64,7 @@ namespace UnityEngine.Rendering
         }
 
         /// <summary>
-        /// Class to store the "Rendering" menu priority on each top level menu
+        /// Class to store the menu priorities on each top level menu
         /// </summary>
         public static class Priorities
         {
