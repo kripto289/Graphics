@@ -38,15 +38,15 @@ CBUFFER_START(UnityScreenSpaceGlobalIllumination)
 CBUFFER_END
 
 // Denoised output buffer
-RW_TEXTURE2D_X(float4, _OutputFilteredBuffer0);
-RW_TEXTURE2D_X(float4, _OutputFilteredBuffer1);
+RW_TEXTURE2D_X(float3, _OutputFilteredBuffer0);
+RW_TEXTURE2D_X(float2, _OutputFilteredBuffer1);
 
 #define SPATIAL_FILTER_SIGMA_RATIO 0.9
 #define DEPTH_WEIGHT_MULTIPLIER 100.0f
 #define NORMAL_WEIGHT_MULTIPLIER 5.0
 
 // Number of samples to compelte the accumulation loop
-#define NUM_SAMPLE_LOOP 8.0
+#define NUM_SAMPLE_LOOP 16.0
 #define EXPONENTIAL_ACCUMULATION_FACTOR (NUM_SAMPLE_LOOP/(NUM_SAMPLE_LOOP + 1.0f))
 
 [numthreads(SSGI_FILTER_TILE_SIZE, SSGI_FILTER_TILE_SIZE, 1)]
@@ -72,8 +72,8 @@ void SPATIAL_FILTER(uint3 dispatchThreadId : SV_DispatchThreadID , uint2 groupTh
     // If the current point we are processing is a background point or the whole history should be discarded for an other reason, we invalidate the history
     if (depth == UNITY_RAW_FAR_CLIP_VALUE)
     {
-        _OutputFilteredBuffer0[COORD_TEXTURE2D_X(centerCoord)] = LOAD_TEXTURE2D_X(_InputNoisyBuffer0, centerCoord);
-        _OutputFilteredBuffer1[COORD_TEXTURE2D_X(centerCoord)] = LOAD_TEXTURE2D_X(_InputNoisyBuffer1, centerCoord);
+        _OutputFilteredBuffer0[COORD_TEXTURE2D_X(centerCoord)] = LOAD_TEXTURE2D_X(_InputNoisyBuffer0, centerCoord).xyz;
+        _OutputFilteredBuffer1[COORD_TEXTURE2D_X(centerCoord)] = LOAD_TEXTURE2D_X(_InputNoisyBuffer1, centerCoord).xy;
         return;
     }
 
@@ -81,8 +81,8 @@ void SPATIAL_FILTER(uint3 dispatchThreadId : SV_DispatchThreadID , uint2 groupTh
     float centerz01 = Linear01Depth(depth, _ZBufferParams);
 
     // Initialize the accumulation buffers
-    float4 colorSum0 = 0.0;
-    float3 colorSum1 = 0.0;
+    float3 colorSum0 = 0.0;
+    float2 colorSum1 = 0.0;
     float wSum = 0.0;
 
     const float sigma = _IndirectDiffuseSpatialFilter * SPATIAL_FILTER_SIGMA_RATIO;
@@ -140,16 +140,15 @@ void SPATIAL_FILTER(uint3 dispatchThreadId : SV_DispatchThreadID , uint2 groupTh
             const float w = r ? gaussian(r, sigma) * depthWeight * normalWeight : 1.0;
 
             // Accumuate this value
-            colorSum0 += LOAD_TEXTURE2D_X(_InputNoisyBuffer0, tapCoord).xyzw * w;
-            colorSum1 += LOAD_TEXTURE2D_X(_InputNoisyBuffer1, tapCoord).xyz * w;
+            colorSum0 += LOAD_TEXTURE2D_X(_InputNoisyBuffer0, tapCoord).xyz * w;
+            colorSum1 += LOAD_TEXTURE2D_X(_InputNoisyBuffer1, tapCoord).xy * w;
             wSum += w;
         }
     }
 
     // Output the result to the buffer and propagate the w channel as is.
-    // TODO: We could save bandwidth by doing this using a 111110 texture and storing the w in a different texture
-    _OutputFilteredBuffer0[COORD_TEXTURE2D_X(centerCoord)] = float4(colorSum0 / wSum);
-    _OutputFilteredBuffer1[COORD_TEXTURE2D_X(centerCoord)] = float4(colorSum1 / wSum, LOAD_TEXTURE2D_X(_InputNoisyBuffer1, centerCoord).w);
+    _OutputFilteredBuffer0[COORD_TEXTURE2D_X(centerCoord)] = colorSum0 / wSum;
+    _OutputFilteredBuffer1[COORD_TEXTURE2D_X(centerCoord)] = float2(colorSum1.x / wSum, LOAD_TEXTURE2D_X(_InputNoisyBuffer1, centerCoord).y);
 }
 
 // History buffer input
@@ -168,8 +167,8 @@ void TEMPORAL_FILTER(uint3 dispatchThreadId : SV_DispatchThreadID
     int2 centerCoord = dispatchThreadId.xy;
 
     // Read the color as early as possible
-    float4 color0 = LOAD_TEXTURE2D_X(_InputNoisyBuffer0, centerCoord);
-    float4 color1 = LOAD_TEXTURE2D_X(_InputNoisyBuffer1, centerCoord);
+    float3 color0 = LOAD_TEXTURE2D_X(_InputNoisyBuffer0, centerCoord).xyz;
+    float2 color1 = LOAD_TEXTURE2D_X(_InputNoisyBuffer1, centerCoord).xy;
 
 #if HALF_RES
     // We need the full res coordinate for the inputs
@@ -186,7 +185,7 @@ void TEMPORAL_FILTER(uint3 dispatchThreadId : SV_DispatchThreadID
 
     // Initialize the output buffer in case of an early exit.
     _OutputFilteredBuffer0[COORD_TEXTURE2D_X(centerCoord)] = color0;
-    _OutputFilteredBuffer1[COORD_TEXTURE2D_X(centerCoord)] = float4(color1.xyz, 1.0);
+    _OutputFilteredBuffer1[COORD_TEXTURE2D_X(centerCoord)] = float2(color1.x, 1.0);
 
     // If the current point we are processing is a background point or the whole history should be discarded for an other reason, we invalidate the history
     if (depth == UNITY_RAW_FAR_CLIP_VALUE)
@@ -238,9 +237,9 @@ void TEMPORAL_FILTER(uint3 dispatchThreadId : SV_DispatchThreadID
         invalidHistory = true;
 
     // Fetch history data
-    float4 history0 = LOAD_TEXTURE2D_X(_HistoryBuffer0, historyTapCoord);
-    float4 history1 = LOAD_TEXTURE2D_X(_HistoryBuffer1, historyTapCoord);
-    float sampleCount = history1.w;
+    float3 history0 = LOAD_TEXTURE2D_X(_HistoryBuffer0, historyTapCoord).xyz;
+    float2 history1 = LOAD_TEXTURE2D_X(_HistoryBuffer1, historyTapCoord).xy;
+    float sampleCount = history1.y;
 
     // Accumulation factor that tells us how much we need to keep the history data
     float accumulationFactor = 0.0;
@@ -253,7 +252,7 @@ void TEMPORAL_FILTER(uint3 dispatchThreadId : SV_DispatchThreadID
 
         // To avoid nan values
         history0 = 0.0;
-        history1 = float4(0.501960784f, 0.501960784f, 0.0, 0.0);
+        history1.x = 0.0;
         sampleCount = 1.0;
     }
     else
@@ -266,7 +265,7 @@ void TEMPORAL_FILTER(uint3 dispatchThreadId : SV_DispatchThreadID
 
         // If the history pixel was moving, we descide to throw partially the history
         // TODO: Expose this as a parameter
-        if (color1.w > 0.0)
+        if (color1.y > 0.0)
         {
             sampleCount = 5.0;
             accumulationFactor = sampleCount / (sampleCount + 1.0);
@@ -274,8 +273,8 @@ void TEMPORAL_FILTER(uint3 dispatchThreadId : SV_DispatchThreadID
     }
 
     // Do the accumulation based on the values we computed and store the new sample count in the w channel
-    _OutputFilteredBuffer0[COORD_TEXTURE2D_X(centerCoord)] = float4(color0 * (1.0 - accumulationFactor) + history0 * accumulationFactor);
-    _OutputFilteredBuffer1[COORD_TEXTURE2D_X(centerCoord)] = float4(color1.xyz * (1.0 - accumulationFactor) + history1.xyz * accumulationFactor, sampleCount);
+    _OutputFilteredBuffer0[COORD_TEXTURE2D_X(centerCoord)] = color0 * (1.0 - accumulationFactor) + history0 * accumulationFactor;
+    _OutputFilteredBuffer1[COORD_TEXTURE2D_X(centerCoord)] = float2(color1.x * (1.0 - accumulationFactor) + history1.x * accumulationFactor, sampleCount);
 }
 
 [numthreads(SSGI_FILTER_TILE_SIZE, SSGI_FILTER_TILE_SIZE, 1)]
@@ -286,6 +285,6 @@ void COPY_HISTORY(uint3 dispatchThreadId : SV_DispatchThreadID)
     if (any(dispatchThreadId.xy > uint2(_ScreenSize.xy)))
         return;  // Out of bounds, discard
 
-    _OutputFilteredBuffer0[COORD_TEXTURE2D_X(dispatchThreadId.xy)] = LOAD_TEXTURE2D_X(_InputNoisyBuffer0, dispatchThreadId.xy);
-    _OutputFilteredBuffer1[COORD_TEXTURE2D_X(dispatchThreadId.xy)] = LOAD_TEXTURE2D_X(_InputNoisyBuffer1, dispatchThreadId.xy);
+    _OutputFilteredBuffer0[COORD_TEXTURE2D_X(dispatchThreadId.xy)] = LOAD_TEXTURE2D_X(_InputNoisyBuffer0, dispatchThreadId.xy).xyz;
+    _OutputFilteredBuffer1[COORD_TEXTURE2D_X(dispatchThreadId.xy)] = LOAD_TEXTURE2D_X(_InputNoisyBuffer1, dispatchThreadId.xy).xy;
 }

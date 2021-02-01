@@ -31,27 +31,30 @@ namespace UnityEngine.Rendering.HighDefinition
                 builder.EnableAsyncCompute(false);
 
                 passData.parameters = PrepareSSGITraceParameters(hdCamera, giSettings);
+
+                // Input prepass data
                 passData.depthTexture = builder.ReadTexture(depthPyramid);
                 passData.normalBuffer = builder.ReadTexture(normalBuffer);
                 if (!hdCamera.frameSettings.IsEnabled(FrameSettingsField.ObjectMotionVectors))
-                {
                     passData.motionVectorsBuffer = builder.ReadTexture(renderGraph.defaultResources.blackTextureXR);
-                }
                 else
-                {
                     passData.motionVectorsBuffer = builder.ReadTexture(motionVectorsBuffer);
-                }
 
+                // History buffers
                 var colorPyramid = hdCamera.GetPreviousFrameRT((int)HDCameraFrameHistoryType.ColorBufferMipChain);
                 passData.colorPyramid = colorPyramid != null ? builder.ReadTexture(renderGraph.ImportTexture(colorPyramid)) : renderGraph.defaultResources.blackTextureXR;
                 var historyDepth = hdCamera.GetCurrentFrameRT((int)HDCameraFrameHistoryType.Depth);
                 passData.historyDepth = historyDepth != null ? builder.ReadTexture(renderGraph.ImportTexture(historyDepth)) : renderGraph.defaultResources.blackTextureXR;
+
+                // Temporary textures
                 passData.hitPointBuffer = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
-                    { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "SSGI Hit Point"});
+                    { colorFormat = GraphicsFormat.R16G16_SFloat, enableRandomWrite = true, name = "SSGI Hit Point"});
+
+                // Output textures
                 passData.outputBuffer0 = builder.WriteTexture(renderGraph.CreateTexture(new TextureDesc(Vector2.one, true, true)
-                    { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "SSGI Signal0"}));
+                    { colorFormat = GraphicsFormat.B10G11R11_UFloatPack32, enableRandomWrite = true, name = "SSGI Color"}));
                 passData.outputBuffer1 = builder.WriteTexture(renderGraph.CreateTexture(new TextureDesc(Vector2.one, true, true)
-                    { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "SSGI Signal1" }));
+                    { colorFormat = GraphicsFormat.R16G16_SFloat, enableRandomWrite = true, name = "SSGI Additional Data" }));
 
                 builder.SetRenderFunc(
                     (TraceSSGIPassData data, RenderGraphContext ctx) =>
@@ -112,25 +115,34 @@ namespace UnityEngine.Rendering.HighDefinition
         class ConvertSSGIPassData
         {
             public SSGIConvertParameters parameters;
+            // Prepass buffers
             public TextureHandle depthTexture;
             public TextureHandle stencilBuffer;
             public TextureHandle normalBuffer;
-            public TextureHandle inoutputBuffer0;
-            public TextureHandle inoutputBuffer1;
+            // Input signal buffers
+            public TextureHandle inputBuffer0;
+            public TextureHandle inputBuffer1;
+            // Output buffer
+            public TextureHandle outputBuffer;
         }
 
-        TextureHandle ConvertSSGI(RenderGraph renderGraph, HDCamera hdCamera, bool halfResolution, TextureHandle depthPyramid, TextureHandle stencilBuffer, TextureHandle normalBuffer, TextureHandle inoutputBuffer0, TextureHandle inoutputBuffer1)
+        TextureHandle ConvertSSGI(RenderGraph renderGraph, HDCamera hdCamera, bool halfResolution, TextureHandle depthPyramid, TextureHandle stencilBuffer, TextureHandle normalBuffer, TextureHandle inputBuffer0, TextureHandle inputBuffer1)
         {
-            using (var builder = renderGraph.AddRenderPass<ConvertSSGIPassData>("Upscale SSGI", out var passData, ProfilingSampler.Get(HDProfileId.SSGIConvert)))
+            using (var builder = renderGraph.AddRenderPass<ConvertSSGIPassData>("Convert SSGI", out var passData, ProfilingSampler.Get(HDProfileId.SSGIConvert)))
             {
                 builder.EnableAsyncCompute(false);
 
                 passData.parameters = PrepareSSGIConvertParameters(hdCamera, halfResolution);
+                // Prepass buffers
                 passData.depthTexture = builder.ReadTexture(depthPyramid);
                 passData.stencilBuffer = builder.ReadTexture(stencilBuffer);
                 passData.normalBuffer = builder.ReadTexture(normalBuffer);
-                passData.inoutputBuffer0 = builder.ReadWriteTexture(inoutputBuffer0);
-                passData.inoutputBuffer1 = builder.ReadWriteTexture(inoutputBuffer1);
+                // Input signal buffers
+                passData.inputBuffer0 = builder.ReadWriteTexture(inputBuffer0);
+                passData.inputBuffer1 = builder.ReadWriteTexture(inputBuffer1);
+                // Output buffer
+                passData.outputBuffer = builder.WriteTexture(renderGraph.CreateTexture(new TextureDesc(Vector2.one, true, true)
+                    { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "SSGI Converted" }));
 
                 builder.SetRenderFunc(
                     (ConvertSSGIPassData data, RenderGraphContext ctx) =>
@@ -140,11 +152,12 @@ namespace UnityEngine.Rendering.HighDefinition
                         resources.depthTexture = data.depthTexture;
                         resources.stencilBuffer = data.stencilBuffer;
                         resources.normalBuffer = data.normalBuffer;
-                        resources.inoutBuffer0 = data.inoutputBuffer0;
-                        resources.inputBufer1 = data.inoutputBuffer1;
+                        resources.inputBuffer0 = data.inputBuffer0;
+                        resources.inputBuffer1 = data.inputBuffer1;
+                        resources.outputBuffer = data.outputBuffer;
                         ExecuteSSGIConversion(ctx.cmd, data.parameters, resources);
                     });
-                return passData.inoutputBuffer0;
+                return passData.outputBuffer;
             }
         }
 

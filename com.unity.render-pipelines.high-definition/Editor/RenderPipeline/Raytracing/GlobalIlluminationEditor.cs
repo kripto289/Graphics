@@ -14,7 +14,6 @@ namespace UnityEditor.Rendering.HighDefinition
 
         // Screen space global illumination parameters
         SerializedDataParameter m_FullResolutionSS;
-        SerializedDataParameter m_DepthBufferThickness;
         SerializedDataParameter m_RaySteps;
         SerializedDataParameter m_FilterRadius;
 
@@ -47,7 +46,6 @@ namespace UnityEditor.Rendering.HighDefinition
 
             // SSGI Parameters
             m_FullResolutionSS = Unpack(o.Find(x => x.fullResolutionSS));
-            m_DepthBufferThickness = Unpack(o.Find(x => x.depthBufferThickness));
             m_RaySteps = Unpack(o.Find(x => x.raySteps));
             m_FilterRadius = Unpack(o.Find(x => x.filterRadius));
 
@@ -76,7 +74,6 @@ namespace UnityEditor.Rendering.HighDefinition
         }
 
         static public readonly GUIContent k_RayLengthText = EditorGUIUtility.TrTextContent("Max Ray Length", "Controls the maximal length of global illumination rays. The higher this value is, the more expensive ray traced global illumination is.");
-        static public readonly GUIContent k_DepthBufferThicknessText = EditorGUIUtility.TrTextContent("Depth Tolerance", "Controls the tolerance when comparing the depth of two pixels.");
 
         public void DenoiserGUI()
         {
@@ -200,8 +197,6 @@ namespace UnityEditor.Rendering.HighDefinition
                         PropertyField(m_RaySteps);
                         PropertyField(m_FilterRadius);
                     }
-
-                    PropertyField(m_DepthBufferThickness, k_DepthBufferThicknessText);
                 }
             }
         }

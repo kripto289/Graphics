@@ -13,7 +13,6 @@ namespace UnityEngine.Rendering.HighDefinition
         int m_TemporalFilterHalfKernel;
         int m_TemporalFilterKernel;
         int m_CopyHistory;
-        static Color s_CoCgAccClearColor = new Color(0.501960784f, 0.501960784f, 0.0f, 0.0f);
 
         public SSGIDenoiser()
         {
@@ -62,11 +61,18 @@ namespace UnityEngine.Rendering.HighDefinition
             }
         }
 
-        RTHandle IndirectDiffuseHistoryBufferAllocatorFunction(string viewName, int frameIndex, RTHandleSystem rtHandleSystem)
+        RTHandle IndirectDiffuseHistoryBufferAllocatorFunction0(string viewName, int frameIndex, RTHandleSystem rtHandleSystem)
         {
-            return rtHandleSystem.Alloc(Vector2.one, TextureXR.slices, colorFormat: GraphicsFormat.R16G16B16A16_SFloat, dimension: TextureXR.dimension,
+            return rtHandleSystem.Alloc(Vector2.one, TextureXR.slices, colorFormat: GraphicsFormat.B10G11R11_UFloatPack32, dimension: TextureXR.dimension,
                 enableRandomWrite: true, useMipMap: false, autoGenerateMips: false,
-                name: string.Format("IndirectDiffuseHistoryBuffer{0}", frameIndex));
+                name: string.Format("IndirectDiffuseHistoryBuffer0{0}", frameIndex));
+        }
+
+        RTHandle IndirectDiffuseHistoryBufferAllocatorFunction1(string viewName, int frameIndex, RTHandleSystem rtHandleSystem)
+        {
+            return rtHandleSystem.Alloc(Vector2.one, TextureXR.slices, colorFormat: GraphicsFormat.R16G16_SFloat, dimension: TextureXR.dimension,
+                enableRandomWrite: true, useMipMap: false, autoGenerateMips: false,
+                name: string.Format("IndirectDiffuseHistoryBuffer1{0}", frameIndex));
         }
 
         struct SSGIDenoiserParameters
@@ -177,7 +183,7 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 // clear it to black if this is the first pass to avoid nans
                 CoreUtils.SetRenderTarget(cmd, resources.indirectDiffuseHistory0, ClearFlag.Color, Color.black);
-                CoreUtils.SetRenderTarget(cmd, resources.indirectDiffuseHistory1, ClearFlag.Color, s_CoCgAccClearColor);
+                CoreUtils.SetRenderTarget(cmd, resources.indirectDiffuseHistory1, ClearFlag.Color, Color.black);
             }
 
             // Bind the input buffers
@@ -220,7 +226,7 @@ namespace UnityEngine.Rendering.HighDefinition
             RTHandle indirectDiffuseHistory = hdCamera.GetCurrentFrameRT((int)HDCameraFrameHistoryType.RaytracedIndirectDiffuseHF);
             if (indirectDiffuseHistory == null)
             {
-                indirectDiffuseHistory = hdCamera.AllocHistoryFrameRT((int)HDCameraFrameHistoryType.RaytracedIndirectDiffuseHF, IndirectDiffuseHistoryBufferAllocatorFunction, 1);
+                indirectDiffuseHistory = hdCamera.AllocHistoryFrameRT((int)HDCameraFrameHistoryType.RaytracedIndirectDiffuseHF, IndirectDiffuseHistoryBufferAllocatorFunction0, 1);
                 historyRequireClear = true;
             }
             return indirectDiffuseHistory;
@@ -232,7 +238,7 @@ namespace UnityEngine.Rendering.HighDefinition
             RTHandle indirectDiffuseHistory = hdCamera.GetCurrentFrameRT((int)HDCameraFrameHistoryType.RaytracedIndirectDiffuseLF);
             if (indirectDiffuseHistory == null)
             {
-                indirectDiffuseHistory = hdCamera.AllocHistoryFrameRT((int)HDCameraFrameHistoryType.RaytracedIndirectDiffuseLF, IndirectDiffuseHistoryBufferAllocatorFunction, 1);
+                indirectDiffuseHistory = hdCamera.AllocHistoryFrameRT((int)HDCameraFrameHistoryType.RaytracedIndirectDiffuseLF, IndirectDiffuseHistoryBufferAllocatorFunction1, 1);
                 historyRequireClear = true;
             }
             return indirectDiffuseHistory;
@@ -267,13 +273,12 @@ namespace UnityEngine.Rendering.HighDefinition
             {
                 builder.EnableAsyncCompute(false);
 
-                // Input buffers
+                // Prepass buffers
                 passData.depthTexture = builder.ReadTexture(depthPyramid);
                 passData.normalBuffer = builder.ReadTexture(normalBuffer);
                 passData.motionVectorsBuffer = builder.ReadTexture(motionVectorsBuffer);
 
-
-                // History buffer
+                // History buffers
                 bool historyRequireClear = false;
                 RTHandle indirectDiffuseHistory0 = RequestIndirectDiffuseHistory0(hdCamera, out historyRequireClear);
                 passData.indirectDiffuseHistory0 = builder.ReadWriteTexture(renderGraph.ImportTexture(indirectDiffuseHistory0));
@@ -281,13 +286,18 @@ namespace UnityEngine.Rendering.HighDefinition
                 passData.indirectDiffuseHistory1 = builder.ReadWriteTexture(renderGraph.ImportTexture(indirectDiffuseHistory1));
                 var historyDepthBuffer = halfResolution ? hdCamera.GetCurrentFrameRT((int)HDCameraFrameHistoryType.Depth1) : hdCamera.GetCurrentFrameRT((int)HDCameraFrameHistoryType.Depth);
                 passData.historyDepthBuffer = historyDepthBuffer != null ? builder.ReadTexture(renderGraph.ImportTexture(historyDepthBuffer)) : renderGraph.defaultResources.blackTextureXR;
+
+                // Intermediate buffers
                 passData.intermediateBuffer0 = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
-                    { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "SSGI Denoiser Intermediate0" });
+                    { colorFormat = GraphicsFormat.B10G11R11_UFloatPack32, enableRandomWrite = true, name = "SSGI Denoiser Intermediate0" });
                 passData.intermediateBuffer1 = builder.CreateTransientTexture(new TextureDesc(Vector2.one, true, true)
-                    { colorFormat = GraphicsFormat.R16G16B16A16_SFloat, enableRandomWrite = true, name = "SSGI Denoiser Intermediate1" });
+                    { colorFormat = GraphicsFormat.R16G16_SFloat, enableRandomWrite = true, name = "SSGI Denoiser Intermediate1" });
+
+                // Input/output buffers
                 passData.inputOutputBuffer0 = builder.ReadWriteTexture(inputOutputBuffer0);
                 passData.inputOutputBuffer1 = builder.ReadWriteTexture(inputOutputBuffer1);
 
+                // Parameters
                 passData.parameters = PrepareSSGIDenoiserParameters(hdCamera, halfResolution, historyValidity, historyRequireClear, depthMipInfo);
 
                 builder.SetRenderFunc(
